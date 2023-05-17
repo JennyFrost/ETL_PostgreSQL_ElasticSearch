@@ -1,4 +1,4 @@
-from typing import List
+from uuid import UUID
 import psycopg2
 from psycopg2.extensions import connection as _connection
 
@@ -29,7 +29,7 @@ class PostgresProducer:
                 tables_modified[table] = num_records[0]
         return tables_modified
 
-    def extract_from_tables(self, time_to_start: int, ids: List[str]) -> dict:
+    def extract_from_tables(self, time_to_start: str, ids: list[str]) -> dict[str: list[UUID]]:
         logger.info(f'Select dates starting from {self.time_to_start}')
         tables_with_modified_records_ids = {}
         tables_modified = self.check_modified()
@@ -42,16 +42,18 @@ class PostgresProducer:
         return tables_with_modified_records_ids
 
     @backoff_break()
-    def extract_new_records(self, table: str, time_to_start: int, ids: List[str] =[]) \
-            -> List[str] | tuple[str, List[str], str]:
+    def extract_new_records(self, table: str, time_to_start: str, was_error: bool = False,
+                            ids: list[str] =[]) -> list[str] | tuple[str, list[str], str, bool]:
         n = 0
         last_date = 0
+        if not was_error:
+            time_to_start = self.time_to_start
         while True:
             try:
                 query = f'''
                             SELECT id, modified
                             FROM content.{table}
-                            WHERE modified > '\''{self.time_to_start}'\''::timestamp with time zone
+                            WHERE modified > '\''{time_to_start}'\''::timestamp with time zone
                             ORDER BY modified
                             LIMIT {self.pack_size}
                             OFFSET {n * self.pack_size}
@@ -66,6 +68,5 @@ class PostgresProducer:
                     break
             except psycopg2.OperationalError:
                 logger.error('Database does not respond! Trying again')
-                return 'error', ids, last_date
-                # return self.extract_new_records(table, last_date=last_date, ids=ids)
+                return 'error', ids, last_date, True
         return ids

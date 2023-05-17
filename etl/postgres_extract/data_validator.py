@@ -1,12 +1,12 @@
 import uuid
-from datetime import datetime
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel, constr, Field
 
 class Person(BaseModel):
     person_id: uuid.UUID
     person_name: str
     person_role: str
+
 
 class Filmwork(BaseModel):
     fw_id: uuid.UUID

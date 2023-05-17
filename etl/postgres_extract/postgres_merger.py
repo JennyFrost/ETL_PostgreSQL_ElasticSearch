@@ -1,4 +1,4 @@
-from typing import Generator, List
+from typing import Generator
 from psycopg2.extensions import connection as _connection
 
 
@@ -8,7 +8,7 @@ class PostgresMerger:
         self.conn = pg_conn
         self.cursor = pg_conn.cursor()
 
-    def merge_records(self, fw_ids: List[str]) -> Generator:
+    def merge_records(self, fw_ids: list[str]) -> Generator:
         ids_str = ', '.join(['\''+id+'\'' for id in fw_ids])
         query = f'''
                     SELECT

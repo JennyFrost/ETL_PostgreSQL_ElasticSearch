@@ -1,5 +1,5 @@
-psycopg2-binary
+psycopg2-binary==2.9.6
 elasticsearch==8.6.2
-pydantic
+pydantic==1.10.7
 python-dotenv==1.0.0
-tzlocal
+tzlocal==5.0.1

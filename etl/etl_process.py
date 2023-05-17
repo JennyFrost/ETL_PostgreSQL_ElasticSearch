@@ -1,7 +1,5 @@
-import os
 from collections import defaultdict
-from typing import List, Tuple
-from dotenv import load_dotenv
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import DictCursor
@@ -9,6 +7,7 @@ from psycopg2.extras import DictCursor
 from etl_logging import logger
 from sleep_func import sleep_func, backoff
 import state
+from settings import PostgresSettings, ElasticSettings
 
 from postgres_extract.data_validator import Filmwork
 from postgres_extract.postgres_producer import PostgresProducer
@@ -19,7 +18,7 @@ from elastic_load.es_loader import ESLoader
 
 class ETLProcess:
 
-    def __init__(self, time_to_sleep: int, pack_size: int, dsl: dict, es_path: List,
+    def __init__(self, time_to_sleep: int, pack_size: int, dsl: dict, es_path: list,
                  es_settings_path: str = 'elastic_load/es_settings.json',
                  index_name: str = 'movies'):
         self.time_to_sleep = time_to_sleep
@@ -29,9 +28,17 @@ class ETLProcess:
         self.pack_size = pack_size
         self.index_name = index_name
 
+    @contextmanager
+    def conn_context(self):
+        conn = psycopg2.connect(**self.dsl, cursor_factory=DictCursor)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
     @backoff()
-    def extract(self, time_to_start: int, ids: List[str]) -> List[Filmwork] | None:
-        with psycopg2.connect(**self.dsl, cursor_factory=DictCursor) as pg_conn:
+    def extract(self, time_to_start: int, ids: list[str]) -> list[Filmwork] | None:
+        with self.conn_context as pg_conn:
             producer = PostgresProducer(time_to_start, self.pack_size, pg_conn)
             tables_modified = producer.check_modified()
             if not tables_modified:
@@ -39,8 +46,6 @@ class ETLProcess:
                 return None
             tables_with_modified_records_ids = producer.extract_from_tables(time_to_start=time_to_start,
                                                                             ids=ids)
-            # for table in tables_with_modified_records_ids:
-            #     print(len(tables_with_modified_records_ids[table]))
             enricher = PostgresEnricher(self.pack_size, pg_conn)
             fws_ids = enricher.enrich_persons_genres(tables_with_modified_records_ids)
             merger = PostgresMerger(pg_conn)
@@ -53,9 +58,9 @@ class ETLProcess:
         logger.info(f'{len(filmworks)} records extracted from postgres')
         return filmworks
 
-    def transform(self, filmworks: List[Filmwork]) -> Tuple[List[dict], List[str]]:
+    def transform(self, filmworks: list[Filmwork]) \
+            -> list[dict[str: str|dict[str: str|float|dict[str: str]]]]:
         to_es = []
-        ids = []
         for fw in filmworks:
             fw_dict = defaultdict(list)
             fw_dict['id'] = str(fw.fw_id)
@@ -70,32 +75,31 @@ class ETLProcess:
                 for role in ('actor', 'writer'):
                     if person.person_role == role:
                         fw_dict[role+'s_names'].append(person.person_name)
-                        person_dict = {}
-                        person_dict['id'] = str(person.person_id)
-                        person_dict['name'] = person.person_name
+                        person_dict = {'id': str(person.person_id), 'name': person.person_name}
                         fw_dict[role+'s'].append(person_dict)
             out_dict = {"index": {
                         '_index': self.index_name,
                         '_id': fw_dict['id']
                         }}
             to_es.extend([out_dict, dict(fw_dict)])
-            ids.append(fw_dict['id'])
 
-        return to_es, ids
+        return to_es
 
     @backoff()
-    def load(self, data: List[dict], ids: List[str]) -> dict:
+    def load(self, data: list[dict[str: str | list[dict[str: str]]]], is_first_time: bool) -> dict[str]:
         loader = ESLoader(self.es_path, self.es_settings_path, self.index_name)
-        loader.create_index()
-        loader.delete_previous(ids)
+        if is_first_time:
+            loader.create_index()
         return loader.load_data(data)
 
     @sleep_func(time_to_sleep=120)
-    def etl(self) -> dict | None:
+    def etl(self) -> dict[str] | None:
         storage = state.JsonFileStorage(file_path='current_state.json')
         cur_state_dict = storage.retrieve_state()
         cur_state = state.State(storage)
+        is_first_time = False
         if not cur_state_dict:
+            is_first_time = True
             time_to_start = datetime.now() - timedelta(days=365)
             time_to_start = time_to_start.strftime("%Y-%m-%d %H:%M:%S")
         else:
@@ -106,25 +110,13 @@ class ETLProcess:
         filmworks = self.extract(time_to_start=time_to_start, ids=[])
         if not filmworks:
             return
-        to_es, ids = self.transform(filmworks)
-        return self.load(to_es, ids)
+        to_es = self.transform(filmworks)
+        return self.load(to_es, is_first_time)
 
 
 if __name__ == '__main__':
-    load_dotenv()
-    dsl = {
-           'dbname': os.environ.get('PG_NAME'),
-           'user': os.environ.get('PG_USER'),
-           'password': os.environ.get('PG_PASSWORD'),
-           'host': os.environ.get('PG_HOST'),
-           'port': os.environ.get('PG_PORT')
-    }
 
-    es_conf = [{
-                'scheme': os.environ.get('ES_SCHEME'),
-                'host': os.environ.get('ES_HOST'),
-                'port': int(os.environ.get('ES_PORT')),
-    }]
-
-    etl_process = ETLProcess(time_to_sleep=20, pack_size=100, dsl=dsl, es_path=es_conf)
+    dsl = PostgresSettings().dict()
+    es_path = [ElasticSettings().dict()]
+    etl_process = ETLProcess(time_to_sleep=20, pack_size=100, dsl=dsl, es_path=es_path)
     etl_process.etl()

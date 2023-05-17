@@ -1,7 +1,5 @@
 from datetime import datetime
 from functools import wraps
-from typing import List
-
 import elasticsearch
 import psycopg2
 import time
@@ -27,10 +25,10 @@ def sleep_func(time_to_sleep: int):
     return func_wrapper
 
 
-def backoff_break(start_sleep_time=0.1, factor=2, border_sleep_time=10):
+def backoff_break(start_sleep_time: float = 0.1, factor: int = 2, border_sleep_time: int = 10):
     def func_wrapper(func):
         @wraps(func)
-        def inner(self, *args, time_to_start: int, ids: List[str]):
+        def inner(self, *args, time_to_start: int, ids: list[str]):
             t = start_sleep_time
             n = 0
             storage = state.JsonFileStorage(file_path='current_state.json')
@@ -40,7 +38,7 @@ def backoff_break(start_sleep_time=0.1, factor=2, border_sleep_time=10):
                     t *= factor ** n
                 else:
                     t = border_sleep_time
-                value = func(self, *args, time_to_start=time_to_start, ids=ids)
+                value = func(self, *args, time_to_start=time_to_start, was_error=True, ids=ids)
                 if 'error' in value:
                     time.sleep(t)
                     n += 1

@@ -1,4 +1,5 @@
-from typing import List
+from uuid import UUID
+
 from psycopg2.extensions import connection as _connection
 
 
@@ -10,7 +11,7 @@ class PostgresEnricher:
         self.cursor = pg_conn.cursor()
         self.tables = ('genre_film_work', 'person_film_work')
 
-    def enrich_persons_genres(self, tables_with_modified_records: dict) -> List[str]:
+    def enrich_persons_genres(self, tables_with_modified_records: dict[str: list[UUID]]) -> list[str]:
         fws_ids = []
         for table in tables_with_modified_records:
             if table in self.tables:
@@ -20,7 +21,7 @@ class PostgresEnricher:
                 fws_ids.extend(tables_with_modified_records[table])
         return fws_ids
 
-    def extract_filmworks(self, ids: List[str], table_to_join: str, column: str) -> List[str]:
+    def extract_filmworks(self, ids: list[str], table_to_join: str, column: str) -> list[str]:
         ids_str = ', '.join(['\''+id+'\'' for id in ids])
         fw_ids = []
         while True:

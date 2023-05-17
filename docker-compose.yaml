@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  etl:
+    build: etl
+    container_name: etl
+    env_file:
+      - etl/.env
+    depends_on:
+      - postgres
+      - elastic
+
+  postgres:
+    image: postgres:13
+    container_name: postgres_db
+    env_file:
+      - etl/.env
+    volumes:
+      - $HOME/postgresql/data:/var/lib/postgresql/data/
+
+  elastic:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.6.2
+    container_name: elastic_db
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"

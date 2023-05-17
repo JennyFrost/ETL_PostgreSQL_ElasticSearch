@@ -1,0 +1,5 @@
+psycopg2-binary
+elasticsearch==8.6.2
+pydantic
+python-dotenv==1.0.0
+tzlocal
